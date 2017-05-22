@@ -1,6 +1,6 @@
 line1 Comit to Notes master
 
-line2
+line2 Commit with branch NotesBranch1
 
 line3
 
