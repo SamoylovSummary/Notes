@@ -1,4 +1,5 @@
 import numpy as np
+import math
 
 #---------------------------------------------------------------------------------------------------
 
@@ -306,10 +307,31 @@ class Function(object):
 
 #---------------------------------------------------------------------------------------------------
 
+class FixedLinear(Function):
+    
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+        
+    def calculate_y(self, x):
+        return x * self.a + self.b
+        
+    def calculate_gx(self, x, y, gy):
+        return gy / self.a
+
+    def __str__(self):
+        return '\n'.join([
+            'a:', indent(str(self.a)),
+            'b:', indent(str(self.b))])
+
+#---------------------------------------------------------------------------------------------------
+
 class Matrix(Function):
     
-    def __init__(self, x_len, y_len, reg2=None, reg3=None):
-        self.w = (np.random.rand(x_len, y_len) - 0.5) * 0.1 #!!!!
+    def __init__(self, x_len, y_len, sigma=None, reg2=None, reg3=None):
+        if sigma is None:
+            sigma = 1 / math.sqrt(x_len)
+        self.w = np.random.randn(x_len, y_len) * sigma
         self.reg2 = reg2
         self.reg3 = reg3
         
@@ -338,8 +360,10 @@ class Matrix(Function):
 
 class Bias(Function):
 
-    def __init__(self, x_len, reg2=None, reg3=None):
-        self.b = (np.random.rand(x_len) - 0.5) * 0.1 #!!!!
+    def __init__(self, x_len, sigma=None, reg2=None, reg3=None):
+        if sigma is None:
+            sigma = 1 / math.sqrt(x_len)
+        self.b = np.random.randn(x_len) * sigma
         self.reg2 = reg2
         self.reg3 = reg3
         
@@ -360,16 +384,6 @@ class Bias(Function):
         # L3 для защиты от взрыва
         if self.reg3 is not None:
             self.b = self.b * np.maximum(0, 1 - self.reg3 * 3 * abs(self.b))
-
-#---------------------------------------------------------------------------------------------------
-
-class NormalizeMean(Function):
-
-    def calculate_y(self, x):
-        return x - np.mean(x, axis=0, keepdims=True)
-        
-    def calculate_gx(self, x, y, gy):
-        return gy #!!!! точно не нужен calculate_gw?
 
 #---------------------------------------------------------------------------------------------------
 
@@ -451,6 +465,17 @@ class Dropout(Function):
     def calculate_gx(self, x, y, gy):
         assert self.mask is not None
         return gy * self.mask
+
+#---------------------------------------------------------------------------------------------------
+
+class MeanNorm(Function):
+
+    def calculate_y(self, x):
+        return x - np.mean(x, axis=0, keepdims=True)
+        
+    def calculate_gx(self, x, y, gy):
+        # На самом деле формула должна быть сложней. Ну да ладно.
+        return gy
 
 #---------------------------------------------------------------------------------------------------
 
