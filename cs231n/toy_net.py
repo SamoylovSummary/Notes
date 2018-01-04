@@ -134,6 +134,7 @@ class Layer(Node):
             return self.data.y
         if self.prev is not None:
             self.data.x = self.prev.forward()
+        assert self.data.x is not None
         self.data.y = self.function.calculate_y(self.data.x)
         return self.data.y
 
@@ -331,7 +332,7 @@ class Matrix(Function):
     
     def __init__(self, x_len, y_len, sigma=None, reg2=None, reg3=None):
         if sigma is None:
-            sigma = 0.1 / math.sqrt(x_len)
+            sigma = 1 / math.sqrt(x_len)
         self.w = np.random.randn(x_len, y_len) * sigma
         self.reg2 = reg2
         self.reg3 = reg3
@@ -361,10 +362,8 @@ class Matrix(Function):
 
 class Bias(Function):
 
-    def __init__(self, x_len, sigma=None, reg2=None, reg3=None):
-        if sigma is None:
-            sigma = 0.1 / math.sqrt(x_len)
-        self.b = np.random.randn(x_len) * sigma
+    def __init__(self, x_len, reg2=None, reg3=None):
+        self.b = np.zeros(x_len)
         self.reg2 = reg2
         self.reg3 = reg3
         
@@ -418,7 +417,6 @@ class Sigmoid(Function):
         
     def calculate_gx(self, x, y, gy):
         return gy * y * (1 - y)
-
 
 # ---------------------------------------------------------------------------------------------------
 
@@ -489,6 +487,28 @@ class Dropout(Function):
         assert self.mask is not None
         return gy * self.mask
 
+
+# ---------------------------------------------------------------------------------------------------
+
+class BatchNorm(Function):
+    def __init__(self):
+        self.sigma = None
+
+    def reset_batch_data(self):
+        self.sigma = None
+
+    def calculate_y(self, x):
+        y = x - np.mean(x, axis=0, keepdims=True)
+        self.sigma = np.maximum(0.001, np.std(y, axis=0, keepdims=True))
+        y = y / self.sigma
+        return y
+
+    def calculate_gx(self, x, y, gy):
+        return gy * self.sigma
+
+    def __str__(self):
+        return '\n'.join([
+            'sigma:', indent(str(self.sigma))])
 
 # ---------------------------------------------------------------------------------------------------
 
