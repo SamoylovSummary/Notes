@@ -73,7 +73,7 @@ class Node(object):
 
 #---------------------------------------------------------------------------------------------------
 
-class LayerBatchData(Node):
+class LayerBatchData(object):
     """
     Временные данные обработки одного минипакета одним слоем.
     Внутренний класс для Layer.
@@ -189,24 +189,25 @@ class ConcatenateNode(Node):
 
     def forward(self):
         xs = [prev.forward() for prev in self.prevs]
-        self.splits = __integrate([x.shape[1] for x in xs])[:-1]
+        self.splits = integrate([x.shape[1] for x in xs])[:-1]
         return np.concatenate(xs, axis=1)
-
-    def __integrate(a):
-        b = a[:]
-        for i in range(1, len(b)):
-            b[i] = b[i - 1] + b[i]
-        return b
 
     def backward(self, gy):
         gy_parts = np.split(gy, self.splits, axis=1)
-        assert len(gy_parts) == len(prevs)
+        assert len(gy_parts) == len(self.prevs)
         for i in len(gy_parts):
-            prevs[i].backward(gy_parts[i])
+            self.prevs[i].backward(gy_parts[i])
 
     def update_weights(self, speed):
         for prev in self.prevs:
             prev.update_weights(speed)
+
+
+def integrate(a):
+    b = a[:]
+    for i in range(1, len(b)):
+        b[i] = b[i - 1] + b[i]
+    return b
 
 #---------------------------------------------------------------------------------------------------
 
@@ -234,9 +235,9 @@ class StackNode(Node):
 
     def backward(self, gy):
         gy_parts = np.split(gy, 1, axis=1)
-        assert len(gy_parts) == len(prevs)
+        assert len(gy_parts) == len(self.prevs)
         for i in len(gy_parts):
-            prevs[i].backward(gy_parts[i])
+            self.prevs[i].backward(gy_parts[i])
 
     def update_weights(self, speed):
         for prev in self.prevs:
@@ -330,7 +331,7 @@ class Matrix(Function):
     
     def __init__(self, x_len, y_len, sigma=None, reg2=None, reg3=None):
         if sigma is None:
-            sigma = 1 / math.sqrt(x_len)
+            sigma = 0.1 / math.sqrt(x_len)
         self.w = np.random.randn(x_len, y_len) * sigma
         self.reg2 = reg2
         self.reg3 = reg3
@@ -348,10 +349,10 @@ class Matrix(Function):
         self.w = self.w - speed * gw
         # L2 norm
         if self.reg2 is not None:
-            self.w = self.w * max(0, 1 - self.reg2 * 2)
+            self.w = self.w * max(0, 1 - speed * self.reg2 * 2)
         # L3 для защиты от взрыва
         if self.reg3 is not None:
-            self.w = self.w * np.maximum(0, 1 - self.reg3 * 3 * abs(self.w))
+            self.w = self.w * np.maximum(0, 1 - speed * self.reg3 * 3 * abs(self.w))
 
     def __str__(self):
         return '\n'.join(['w:', indent(str(self.w))])
@@ -362,7 +363,7 @@ class Bias(Function):
 
     def __init__(self, x_len, sigma=None, reg2=None, reg3=None):
         if sigma is None:
-            sigma = 1 / math.sqrt(x_len)
+            sigma = 0.1 / math.sqrt(x_len)
         self.b = np.random.randn(x_len) * sigma
         self.reg2 = reg2
         self.reg3 = reg3
@@ -418,17 +419,39 @@ class Sigmoid(Function):
     def calculate_gx(self, x, y, gy):
         return gy * y * (1 - y)
 
-#---------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------
 
 class Tanh(Function):
-
     def calculate_y(self, x):
         x_norm = np.minimum(10, np.maximum(-10, x))
         x_e = np.exp(-2 * x_norm)
         return (1 - x_e) / (1 + x_e)
-        
+
     def calculate_gx(self, x, y, gy):
         return gy * (1 - y * y)
+
+# ---------------------------------------------------------------------------------------------------
+
+class TanhRelu(Function):
+    def calculate_y(self, x):
+        x_norm = np.minimum(10, np.maximum(-10, x))
+        x_e = np.exp(-2 * x_norm)
+        return (1 - x_e) / (1 + x_e)
+
+    def calculate_gx(self, x, y, gy):
+        return gy * (x > 0).astype(float)
+
+# ---------------------------------------------------------------------------------------------------
+
+class TanhLin(Function):
+    def calculate_y(self, x):
+        x_norm = np.minimum(10, np.maximum(-10, x))
+        x_e = np.exp(-2 * x_norm)
+        return (1 - x_e) / (1 + x_e)
+
+    def calculate_gx(self, x, y, gy):
+        return gy * (x > 0).astype(float)
 
 #---------------------------------------------------------------------------------------------------
 
@@ -466,13 +489,14 @@ class Dropout(Function):
         assert self.mask is not None
         return gy * self.mask
 
-#---------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------
 
 class MeanNorm(Function):
 
     def calculate_y(self, x):
         return x - np.mean(x, axis=0, keepdims=True)
-        
+
     def calculate_gx(self, x, y, gy):
         # На самом деле формула должна быть сложней. Ну да ладно.
         return gy
