@@ -330,13 +330,14 @@ class FixedLinear(Function):
 
 class Matrix(Function):
     
-    def __init__(self, x_len, y_len, sigma=None, reg2=None, reg3=None):
+    def __init__(self, x_len, y_len, sigma=None, reg2=None, reg2_constrain=None, reg3=None):
         if sigma is None:
             sigma = 1 / math.sqrt(x_len)
         self.w = np.random.randn(x_len, y_len) * sigma
         self.reg2 = reg2
+        self.reg2_constrain = reg2_constrain * sigma
         self.reg3 = reg3
-        
+
     def calculate_y(self, x):
         return np.dot(x, self.w)
         
@@ -350,13 +351,30 @@ class Matrix(Function):
         self.w = self.w - speed * gw
         # L2 norm
         if self.reg2 is not None:
-            self.w = self.w * max(0, 1 - speed * self.reg2 * 2)
+            # Ограничение области действия L2
+            if self.reg2_constrain is not None:
+                reg2_coeff = np.std(self.w, axis=0, keepdims=True) > self.reg2_constrain
+                reg2_coeff = np.maximum(0, 1 - reg2_coeff * speed * self.reg2 * 2)
+            else:
+                reg2_coeff = max(0, 1 - speed * self.reg2 * 2)
+            self.w = self.w * reg2_coeff
         # L3 для защиты от взрыва
         if self.reg3 is not None:
-            self.w = self.w * np.maximum(0, 1 - speed * self.reg3 * 3 * abs(self.w))
+            self.w = self.w * np.maximum(0, 1 - self.reg3 * 3 * abs(self.w))
+
+    def trace_statistics(self, x):
+        return '\n'.join([
+            'Matrix log10(column std):', indent(str(np.around(np.log10(np.std(self.w, axis=0)), 2))),
+            'Matrix log10(y std):', indent(str(np.around(np.log10(np.std(np.dot(x, self.w), axis=0)), 2))),
+        ])
 
     def __str__(self):
-        return '\n'.join(['w:', indent(str(self.w))])
+        return '\n'.join([
+            'w:', indent(str(self.w)),
+            'reg2:', indent(str(self.reg2)),
+            'reg2_constrain:', indent(str(self.reg2_constrain)),
+            'reg3:', indent(str(self.reg3))
+        ])
 
 #---------------------------------------------------------------------------------------------------
 
@@ -486,7 +504,6 @@ class Dropout(Function):
     def calculate_gx(self, x, y, gy):
         assert self.mask is not None
         return gy * self.mask
-
 
 # ---------------------------------------------------------------------------------------------------
 
@@ -699,10 +716,11 @@ class Net(object):
 #---------------------------------------------------------------------------------------------------
 
 def build_sequence_net(functions):
-    input_layer = Layer(functions[0], None)
-    last_layer = input_layer
-    for function in functions[1:]:
-        last_layer = Layer(function, last_layer)
-    return Net([input_layer], last_layer)
+    layers = list()
+    for function in functions:
+        last_layer = layers[-1] if layers else None
+        layers.append(Layer(function, last_layer))
+    net = Net([layers[0]], layers[-1])
+    return net, layers
 
 #---------------------------------------------------------------------------------------------------
