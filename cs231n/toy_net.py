@@ -23,6 +23,7 @@ print('toy_net reload')
 #---------------------------------------------------------------------------------------------------
 # Вспомогательные функции.
 
+
 def indent(text, prefix='  '):
     """Добавляет в начало каждой строки текста text сдвиг prefix"""
     lines = text.split('\n')
@@ -33,6 +34,7 @@ def indent(text, prefix='  '):
     return '\n'.join(lines)
 
 #---------------------------------------------------------------------------------------------------
+
 
 class Node(object):
     """
@@ -73,6 +75,7 @@ class Node(object):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class LayerBatchData(object):
     """
     Временные данные обработки одного минипакета одним слоем.
@@ -85,6 +88,8 @@ class LayerBatchData(object):
         self.gx = None
         self.gy = None
         self.gw = None
+        self.m1 = None
+        self.m2 = None
 
     def accumulate_gradients(self, gx, gy, gw):
         accumulate = lambda x, y: x + y if x is not None else y
@@ -98,9 +103,12 @@ class LayerBatchData(object):
             'y:', indent(str(self.y)),
             'gx:', indent(str(self.gx)),
             'gy:', indent(str(self.gy)),
-            'gw:', indent(str(self.gw))])
+            'gw:', indent(str(self.gw)),
+            'm1:', indent(str(self.m1)),
+            'm2:', indent(str(self.m2))])
 
 #---------------------------------------------------------------------------------------------------
+
 
 class Layer(Node):
     """
@@ -168,6 +176,7 @@ class Layer(Node):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class ConcatenateNode(Node):
     """
     Узел, объединяющий несколько входных слоёв на манер numpy.concatenate.
@@ -212,6 +221,7 @@ def integrate(a):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class StackNode(Node):
     """
     Узел, объединяющий несколько входных слоёв на манер numpy.stack.
@@ -245,6 +255,7 @@ class StackNode(Node):
             prev.update_weights(speed)
 
 #---------------------------------------------------------------------------------------------------
+
 
 class Function(object):
     """
@@ -309,6 +320,7 @@ class Function(object):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class FixedLinear(Function):
     
     def __init__(self, a, b):
@@ -328,6 +340,7 @@ class FixedLinear(Function):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class Matrix(Function):
     
     def __init__(self, x_len, y_len, sigma=None, reg2=None, reg2_constrain=None, reg3=None):
@@ -335,38 +348,43 @@ class Matrix(Function):
             sigma = 1 / math.sqrt(x_len)
         self.w = np.random.randn(x_len, y_len) * sigma
         self.reg2 = reg2
-        self.reg2_constrain = reg2_constrain * sigma
+        self.reg2_constrain = reg2_constrain
+        if reg2_constrain is not None:
+            self.reg2_constrain *= reg2_constrain * sigma
         self.reg3 = reg3
 
     def calculate_y(self, x):
         return np.dot(x, self.w)
-        
+
     def calculate_gx(self, x, y, gy):
         return np.dot(gy, self.w.transpose())
 
     def calculate_gw(self, x, y, gy):
-        return np.dot(x.transpose(), gy)
-
-    def update_weights(self, speed, gw):
-        self.w = self.w - speed * gw
-        # L2 norm
+        gw = np.dot(x.transpose(), gy)
+        # Регуляризация
+        # L2
         if self.reg2 is not None:
             # Ограничение области действия L2
             if self.reg2_constrain is not None:
-                reg2_coeff = np.std(self.w, axis=0, keepdims=True) > self.reg2_constrain
-                reg2_coeff = np.maximum(0, 1 - reg2_coeff * speed * self.reg2 * 2)
+                reg2_mask = np.std(self.w, axis=0, keepdims=True) > self.reg2_constrain
             else:
-                reg2_coeff = max(0, 1 - speed * self.reg2 * 2)
-            self.w = self.w * reg2_coeff
+                reg2_mask = 1
+            gw += self.w * reg2_mask * self.reg2 * 2
         # L3 для защиты от взрыва
         if self.reg3 is not None:
-            self.w = self.w * np.maximum(0, 1 - self.reg3 * 3 * abs(self.w))
+            gw += self.w * abs(self.w) * self.reg3 * 3
+        return gw
+
+    def update_weights(self, speed, gw):
+        self.w = self.w - speed * gw
 
     def trace_statistics(self, x):
-        return '\n'.join([
-            'Matrix log10(column std):', indent(str(np.around(np.log10(np.std(self.w, axis=0)), 2))),
-            'Matrix log10(y std):', indent(str(np.around(np.log10(np.std(np.dot(x, self.w), axis=0)), 2))),
-        ])
+        s = 'Matrix statistics:\n'
+        w_std = np.log10(np.std(self.w, axis=0))
+        s += '  column std log10 min: %.2f, max: %.2f\n' % (w_std.min(), w_std.max())
+        y_std = np.log10(np.std(np.dot(x, self.w), axis=0))
+        s += '  y std log10 min: %.2f, max: %.2f' % (y_std.min(), y_std.max())
+        return s
 
     def __str__(self):
         return '\n'.join([
@@ -377,6 +395,7 @@ class Matrix(Function):
         ])
 
 #---------------------------------------------------------------------------------------------------
+
 
 class Bias(Function):
 
@@ -392,18 +411,21 @@ class Bias(Function):
         return gy
 
     def calculate_gw(self, x, y, gy):
-        return np.sum(gy, axis=0)
+        gw = np.sum(gy, axis=0)
+        # Регуляризация
+        # L2
+        if self.reg2 is not None:
+            gw += self.b * self.reg2 * 2
+        # L3 для защиты от взрыва
+        if self.reg3 is not None:
+            gw += self.b * abs(self.b) * self.reg3 * 3
+        return gw
 
     def update_weights(self, speed, gw):
         self.b = self.b - speed * gw
-        # L2 norm
-        if self.reg2 is not None:
-            self.b = self.b * max(0, 1 - self.reg2 * 2)
-        # L3 для защиты от взрыва
-        if self.reg3 is not None:
-            self.b = self.b * np.maximum(0, 1 - self.reg3 * 3 * abs(self.b))
 
 #---------------------------------------------------------------------------------------------------
+
 
 class Reshape(Function):
 
@@ -418,6 +440,7 @@ class Reshape(Function):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class Relu(Function):
 
     def calculate_y(self, x):
@@ -428,6 +451,7 @@ class Relu(Function):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class Sigmoid(Function):
 
     def calculate_y(self, x):
@@ -437,6 +461,7 @@ class Sigmoid(Function):
         return gy * y * (1 - y)
 
 # ---------------------------------------------------------------------------------------------------
+
 
 class Tanh(Function):
     def calculate_y(self, x):
@@ -449,6 +474,7 @@ class Tanh(Function):
 
 # ---------------------------------------------------------------------------------------------------
 
+
 class TanhRelu(Function):
     def calculate_y(self, x):
         x_norm = np.minimum(10, np.maximum(-10, x))
@@ -460,6 +486,7 @@ class TanhRelu(Function):
 
 # ---------------------------------------------------------------------------------------------------
 
+
 class TanhLin(Function):
     def calculate_y(self, x):
         x_norm = np.minimum(10, np.maximum(-10, x))
@@ -470,6 +497,7 @@ class TanhLin(Function):
         return gy * (x > 0).astype(float)
 
 #---------------------------------------------------------------------------------------------------
+
 
 class MaxPool(Function):
 
@@ -485,6 +513,7 @@ def indicator_of_max(x):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class Dropout(Function):
 
     def __init__(self, p):
@@ -496,16 +525,17 @@ class Dropout(Function):
 
     def calculate_y(self, x):
         if self.mask is None:
-            self.mask = np.array(np.random.random(x.shape) > self.p, dtype='float')
+            self.mask = np.array(np.random.random(x.shape[1:]) > self.p, dtype='float')
         else:
             assert self.mask.shape == x.shape
-        return x * self.mask
+        return x * self.mask / (1 - self.p)
         
     def calculate_gx(self, x, y, gy):
         assert self.mask is not None
-        return gy * self.mask
+        return gy * self.mask / (1 - self.p)
 
 # ---------------------------------------------------------------------------------------------------
+
 
 class BatchNorm(Function):
     def __init__(self):
@@ -521,13 +551,14 @@ class BatchNorm(Function):
         return y
 
     def calculate_gx(self, x, y, gy):
-        return gy * self.sigma
+        return gy / self.sigma
 
     def __str__(self):
         return '\n'.join([
             'sigma:', indent(str(self.sigma))])
 
 # ---------------------------------------------------------------------------------------------------
+
 
 class MeanNorm(Function):
 
@@ -539,6 +570,7 @@ class MeanNorm(Function):
         return gy
 
 #---------------------------------------------------------------------------------------------------
+
 
 class GradNorm(Function):
 
@@ -555,6 +587,7 @@ class GradNorm(Function):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class SoftMax(Function):
 
     def calculate_y(self, x):
@@ -569,6 +602,7 @@ class SoftMax(Function):
         return y * (gy - s)
 
 #---------------------------------------------------------------------------------------------------
+
 
 class Loss(Function):
     """
@@ -587,6 +621,7 @@ class Loss(Function):
         self.ground = ground
 
 #---------------------------------------------------------------------------------------------------
+
 
 class SvmLoss(Loss):
 
@@ -648,6 +683,7 @@ class SvmLoss(Loss):
 
 #---------------------------------------------------------------------------------------------------
 
+
 class EntropyLoss(Loss):
 
     def calculate_y(self, x):
@@ -676,6 +712,7 @@ class EntropyLoss(Loss):
         return gx
 
 #---------------------------------------------------------------------------------------------------
+
 
 class Net(object):
 
@@ -714,6 +751,7 @@ class Net(object):
         return self.loss_layer.prev.forward()
 
 #---------------------------------------------------------------------------------------------------
+
 
 def build_sequence_net(functions):
     layers = list()
