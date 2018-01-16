@@ -277,11 +277,11 @@ class Net(object):
 #---------------------------------------------------------------------------------------------------
 
 
-def build_sequence_net(functions, optimizer=SGD()):
+def build_sequence_net(functions, optimizer=SGD):
     layers = list()
     for func in functions:
         last_layer = layers[-1] if layers else None
-        layers.append(Layer(func, last_layer, optimizer))
+        layers.append(Layer(func, last_layer, optimizer()))
     net = Net([layers[0]], layers[-1])
     return net, layers
 

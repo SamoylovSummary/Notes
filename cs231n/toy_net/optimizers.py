@@ -52,7 +52,7 @@ class Adam(Optimizer):
     Stochastic Gradient Descent optimizer
     """
 
-    def __init__(self, beta1=0.9, beta2=0.9):
+    def __init__(self, beta1=0.9, beta2=0.999):
         self.beta1 = beta1
         self.beta2 = beta2
         self.m1 = None
@@ -61,14 +61,16 @@ class Adam(Optimizer):
 
     def calculate_dw(self, speed, gw):
         self.step += 1
-        m1 = np.zeros_like(gw)
-        m1 = self.beta1 * m1 + (1 - self.beta1) * gw
-        m1 /= 1 - self.beta1 ** self.step
-        m2 = np.zeros_like(gw)
-        m2 = self.beta2 * m2 + (1 - self.beta2) * np.square(gw)
-        m2 /= 1 - self.beta2 ** self.step
+        if self.m1 is None:
+            self.m1 = np.zeros_like(gw)
+        self.m1 = self.beta1 * self.m1 + (1 - self.beta1) * gw
+        m1_norm = self.m1 / (1 - self.beta1 ** self.step)
+        if self.m2 is None:
+            self.m2 = np.zeros_like(gw)
+        self.m2 = self.beta2 * self.m2 + (1 - self.beta2) * np.square(gw)
+        m2_norm = self.m2 / (1 - self.beta2 ** self.step)
         epsilon = 1e-5
-        return -speed * m1 / np.sqrt(m2 + epsilon)
+        return -speed * m1_norm / np.sqrt(m2_norm + epsilon)
 
     def __str__(self):
         return '\n'.join([
