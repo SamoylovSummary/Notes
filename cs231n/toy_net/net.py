@@ -152,7 +152,8 @@ class Layer(Node):
     def __str__(self):
         return '\n'.join([
             'data:', indent(str(self.data)),
-            'func:', indent(str(self.func))])
+            'func:', indent(str(self.func)),
+            'optimizer:', indent(str(self.optimizer))])
 
 #---------------------------------------------------------------------------------------------------
 
@@ -276,11 +277,11 @@ class Net(object):
 #---------------------------------------------------------------------------------------------------
 
 
-def build_sequence_net(functions):
+def build_sequence_net(functions, optimizer=SGD()):
     layers = list()
     for func in functions:
         last_layer = layers[-1] if layers else None
-        layers.append(Layer(func, last_layer))
+        layers.append(Layer(func, last_layer, optimizer))
     net = Net([layers[0]], layers[-1])
     return net, layers
 
