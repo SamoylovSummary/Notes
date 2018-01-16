@@ -64,7 +64,7 @@ class Node(object):
         """
         raise NotImplementedError()
 
-    def update_weights(self, speed):
+    def update(self, speed):
         """
         Отложенное обновление параметров (весов) слоя.
         Вызывается снаружи по цепочке от конца к началу.
@@ -76,7 +76,7 @@ class Node(object):
 #---------------------------------------------------------------------------------------------------
 
 
-class LayerBatchData(object):
+class FunctionBatchData(object):
     """
     Временные данные обработки одного минипакета одним слоем.
     Внутренний класс для Layer.
@@ -88,11 +88,10 @@ class LayerBatchData(object):
         self.gx = None
         self.gy = None
         self.gw = None
-        self.m1 = None
-        self.m2 = None
 
     def accumulate_gradients(self, gx, gy, gw):
-        accumulate = lambda x, y: x + y if x is not None else y
+        def accumulate(x, y):
+            return x + y if x is not None else y
         self.gx = accumulate(self.gx, gx)
         self.gy = accumulate(self.gy, gy)
         self.gw = accumulate(self.gw, gw)
@@ -103,9 +102,38 @@ class LayerBatchData(object):
             'y:', indent(str(self.y)),
             'gx:', indent(str(self.gx)),
             'gy:', indent(str(self.gy)),
-            'gw:', indent(str(self.gw)),
-            'm1:', indent(str(self.m1)),
-            'm2:', indent(str(self.m2))])
+            'gw:', indent(str(self.gw))])
+
+#---------------------------------------------------------------------------------------------------
+
+
+class Optimizer(object):
+    """
+    Optimizer - алгоритм вычисления дельты весов
+    """
+
+    def calculate_dw(self, speed, gw):
+        """
+        Вычисление дельты весов.
+        Args:
+            speed: скорость обучения.
+            gw: dL/dw - градиент функции потерь по параметрам слоя (например, весам).
+                Не может быть None (внешний код должен сам это проверять).
+        Returns:
+            dw: дельта весов - прибавляется к весам слоя.
+        """
+        raise NotImplementedError()
+
+#---------------------------------------------------------------------------------------------------
+
+
+class SGD(Optimizer):
+    """
+    Stochastic Gradient Descent optimizer
+    """
+
+    def calculate_dw(self, speed, gw):
+        return -speed * gw
 
 #---------------------------------------------------------------------------------------------------
 
@@ -115,10 +143,11 @@ class Layer(Node):
     Узел нейросети, содержащий один слой. Обёртка над Function для сборки слоёв в цепочки.
     """
 
-    def __init__(self, function, prev=None):
-        self.function = function
+    def __init__(self, func, prev=None, optimizer=SGD()):
+        self.func = func
         self.prev = prev
-        self.data = LayerBatchData()
+        self.optimizer = optimizer
+        self.data = FunctionBatchData()
         self.are_weights_updated = False
 
     def reset_batch_data(self):
@@ -126,8 +155,8 @@ class Layer(Node):
         Подготовка перед обработкой минипакета.
         Очищает временные данные.
         """
-        self.function.reset_batch_data()
-        self.data = LayerBatchData()
+        self.func.reset_batch_data()
+        self.data = FunctionBatchData()
         self.are_weights_updated = False
         if self.prev is not None:
             self.prev.reset_batch_data()
@@ -143,7 +172,7 @@ class Layer(Node):
         if self.prev is not None:
             self.data.x = self.prev.forward()
         assert self.data.x is not None
-        self.data.y = self.function.calculate_y(self.data.x)
+        self.data.y = self.func.calculate_y(self.data.x)
         return self.data.y
 
     def backward(self, gy):
@@ -152,27 +181,31 @@ class Layer(Node):
         Изначально вызывается у последнего (loss) слоя. Далее по цепочке от конца к началу 
         вызываются остальные слои.
         """
-        gx = self.function.calculate_gx(self.data.x, self.data.y, gy)
-        gw = self.function.calculate_gw(self.data.x, self.data.y, gy)
+        gx = self.func.calculate_gx(self.data.x, self.data.y, gy)
+        gw = self.func.calculate_gw(self.data.x, self.data.y, gy)
         self.data.accumulate_gradients(gx, gy, gw)
         if self.prev is not None:
             self.prev.backward(gx)
 
-    def update_weights(self, speed):
+    def update(self, speed):
         """
         Отложенное обновление параметров (весов) слоя.
         Вызывается снаружи по цепочке от конца к началу.
         """
-        if not self.are_weights_updated:
-            self.function.update_weights(speed, self.data.gw)
-            self.are_weights_updated = True
+        if self.are_weights_updated:
+            return
+        self.are_weights_updated = True
+        if self.data.gw is not None:
+            assert self.optimizer is not None
+            dw = self.optimizer.calculate_dw(speed, self.data.gw)
+            self.func.update(dw)
         if self.prev is not None:
-            self.prev.update_weights(speed)
+            self.prev.update(speed)
 
     def __str__(self):
         return '\n'.join([
             'data:', indent(str(self.data)),
-            'function:', indent(str(self.function))])
+            'func:', indent(str(self.func))])
 
 #---------------------------------------------------------------------------------------------------
 
@@ -208,9 +241,9 @@ class ConcatenateNode(Node):
         for i in len(gy_parts):
             self.prevs[i].backward(gy_parts[i])
 
-    def update_weights(self, speed):
+    def update(self, speed):
         for prev in self.prevs:
-            prev.update_weights(speed)
+            prev.update(speed)
 
 
 def integrate(a):
@@ -250,9 +283,9 @@ class StackNode(Node):
         for i in len(gy_parts):
             self.prevs[i].backward(gy_parts[i])
 
-    def update_weights(self, speed):
+    def update(self, speed):
         for prev in self.prevs:
-            prev.update_weights(speed)
+            prev.update(speed)
 
 #---------------------------------------------------------------------------------------------------
 
@@ -302,19 +335,17 @@ class Function(object):
             gy: dL/dy - градиент функции потерь по y, возвращаемых из calculate_y
         Returns:
             gw: dL/dw - градиент функции потерь по параметрам слоя (например, весам). Этот градиент
-                накапливается во внешней обёртке Layer, а потом передаётся в update_weights.
-                То есть параметры слоя изменяются не в backward, а в update_weights.
+                накапливается во внешней обёртке Layer, а потом передаётся в update.
+                То есть параметры слоя изменяются не в backward, а в update.
                 Может быть None.
         """
         return None
         
-    def update_weights(self, speed, gw):
+    def update(self, dw):
         """
         Отложенное обновление параметров (весов) слоя.
         Args:
-            speed: скорость обучения.
-            gw: dL/dw - суммарный (по нескольким do_backward) градиент функции потерь по параметрам 
-                слоя (например, весам).
+            dw: дельта весов. Нужно прибавить к весам функции.
         """
         pass
 
@@ -375,8 +406,8 @@ class Matrix(Function):
             gw += self.w * abs(self.w) * self.reg3 * 3
         return gw
 
-    def update_weights(self, speed, gw):
-        self.w = self.w - speed * gw
+    def update(self, dw):
+        self.w = self.w + dw
 
     def trace_statistics(self, x):
         s = 'Matrix statistics:\n'
@@ -421,8 +452,8 @@ class Bias(Function):
             gw += self.b * abs(self.b) * self.reg3 * 3
         return gw
 
-    def update_weights(self, speed, gw):
-        self.b = self.b - speed * gw
+    def update(self, dw):
+        self.b = self.b + dw
 
 #---------------------------------------------------------------------------------------------------
 
@@ -728,14 +759,14 @@ class Net(object):
 
     def forward(self, xs, ground):
         self.prepare_batch(xs)
-        self.loss_layer.function.set_ground(ground)
+        self.loss_layer.func.set_ground(ground)
         self.loss_layer.forward()
         return self.loss_layer.data.x, self.loss_layer.data.y
 
     def train(self, xs, ground, speed):
         y, loss = self.forward(xs, ground)
         self.loss_layer.backward(None)
-        self.loss_layer.update_weights(speed)
+        self.loss_layer.update(speed)
         return np.sum(loss)
 
     def calculate_accuracy(self, xs, ground):
@@ -755,9 +786,9 @@ class Net(object):
 
 def build_sequence_net(functions):
     layers = list()
-    for function in functions:
+    for func in functions:
         last_layer = layers[-1] if layers else None
-        layers.append(Layer(function, last_layer))
+        layers.append(Layer(func, last_layer))
     net = Net([layers[0]], layers[-1])
     return net, layers
 
