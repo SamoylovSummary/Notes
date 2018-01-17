@@ -134,10 +134,10 @@ class Matrix(Function):
 
     def trace_statistics(self, x):
         s = 'Matrix statistics:\n'
-        w_std = np.log10(np.std(self.w, axis=0))
-        s += '  column std log10 min: %.2f, max: %.2f\n' % (w_std.min(), w_std.max())
-        y_std = np.log10(np.std(np.dot(x, self.w), axis=0))
-        s += '  y std log10 min: %.2f, max: %.2f' % (y_std.min(), y_std.max())
+        w_std = np.std(self.w, axis=0)
+        s += '  column std min: %.5f, max: %.5f\n' % (w_std.min(), w_std.max())
+        y_std = np.std(np.dot(x, self.w), axis=0)
+        s += '  y std min: %.5f, max: %.5f' % (y_std.min(), y_std.max())
         return s
 
     def __str__(self):
