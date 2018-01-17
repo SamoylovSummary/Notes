@@ -134,11 +134,17 @@ class Matrix(Function):
 
     def trace_statistics(self, x):
         s = 'Matrix statistics:\n'
-        w_std = np.std(self.w, axis=0)
-        s += '  column std min: %.5f, max: %.5f\n' % (w_std.min(), w_std.max())
-        y_std = np.std(np.dot(x, self.w), axis=0)
-        s += '  y std min: %.5f, max: %.5f' % (y_std.min(), y_std.max())
+        s += indent(self._trace_single_statistics('column', self.w)) + '\n'
+        s += indent(self._trace_single_statistics('y     ', np.dot(x, self.w))) + '\n'
         return s
+
+    @staticmethod
+    def _trace_single_statistics(name, x):
+        mean = np.mean(x, axis=0)
+        std = np.std(x, axis=0)
+        std_log = np.log10(std)
+        return '%s: mean: [%.4f, %.4f], std: [%.4f, %.4f], log10: [%.2f, %.2f]' \
+             % (name, mean.min(), mean.max(), std.min(), std.max(), math.log10(std.min()), math.log10(std.max()))
 
     def __str__(self):
         return '\n'.join([
