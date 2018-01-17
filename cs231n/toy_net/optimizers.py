@@ -1,5 +1,4 @@
 import numpy as np
-import math
 
 from toy_net.common import *
 
