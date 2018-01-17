@@ -135,7 +135,7 @@ class Matrix(Function):
     def trace_statistics(self, x):
         s = 'Matrix statistics:\n'
         s += indent(self._trace_single_statistics('column', self.w)) + '\n'
-        s += indent(self._trace_single_statistics('y     ', np.dot(x, self.w))) + '\n'
+        s += indent(self._trace_single_statistics('y     ', np.dot(x, self.w)))
         return s
 
     @staticmethod
@@ -231,30 +231,6 @@ class Tanh(Function):
 
     def calculate_gx(self, x, y, gy):
         return gy * (1 - y * y)
-
-# ---------------------------------------------------------------------------------------------------
-
-
-class TanhRelu(Function):
-    def calculate_y(self, x):
-        x_norm = np.minimum(10, np.maximum(-10, x))
-        x_e = np.exp(-2 * x_norm)
-        return (1 - x_e) / (1 + x_e)
-
-    def calculate_gx(self, x, y, gy):
-        return gy * (x > 0).astype(float)
-
-# ---------------------------------------------------------------------------------------------------
-
-
-class TanhLin(Function):
-    def calculate_y(self, x):
-        x_norm = np.minimum(10, np.maximum(-10, x))
-        x_e = np.exp(-2 * x_norm)
-        return (1 - x_e) / (1 + x_e)
-
-    def calculate_gx(self, x, y, gy):
-        return gy * (x > 0).astype(float)
 
 #---------------------------------------------------------------------------------------------------
 
