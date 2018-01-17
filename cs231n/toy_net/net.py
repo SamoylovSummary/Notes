@@ -1,5 +1,5 @@
 import numpy as np
-import math
+import copy
 
 from toy_net.common import *
 from toy_net.optimizers import *
@@ -277,11 +277,13 @@ class Net(object):
 #---------------------------------------------------------------------------------------------------
 
 
-def build_sequence_net(functions, optimizer=SGD):
+def build_sequence_net(functions, optimizer=SGD()):
     layers = list()
     for func in functions:
         last_layer = layers[-1] if layers else None
-        layers.append(Layer(func, last_layer, optimizer()))
+        new_optimizer = copy.deepcopy(optimizer)
+        new_layer = Layer(func, last_layer, new_optimizer)
+        layers.append(new_layer)
     net = Net([layers[0]], layers[-1])
     return net, layers
 
