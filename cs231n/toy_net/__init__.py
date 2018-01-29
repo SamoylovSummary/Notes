@@ -24,4 +24,3 @@ from toy_net.common import *
 from toy_net.functions import *
 from toy_net.net import *
 from toy_net.optimizers import *
-

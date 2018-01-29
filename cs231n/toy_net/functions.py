@@ -97,7 +97,8 @@ class FixedLinear(Function):
 
 class Matrix(Function):
     
-    def __init__(self, x_len, y_len, sigma=None, reg2=None, reg2_constrain=None, reg3=None):
+    def __init__(self, x_len, y_len, sigma=None, reg2=None, reg2_constrain=None, reg3=None,
+                 reg_cifar_2D=None, reg_sign=False):
         if sigma is None:
             sigma = 1 / math.sqrt(x_len)
         self.w = np.random.randn(x_len, y_len) * sigma
@@ -106,6 +107,8 @@ class Matrix(Function):
         if reg2_constrain is not None:
             self.reg2_constrain *= reg2_constrain * sigma
         self.reg3 = reg3
+        self.reg_cifar_2D = reg_cifar_2D
+        self.reg_sign = reg_sign
 
     def calculate_y(self, x):
         return np.dot(x, self.w)
@@ -127,24 +130,33 @@ class Matrix(Function):
         # L3 для защиты от взрыва
         if self.reg3 is not None:
             gw += self.w * abs(self.w) * self.reg3 * 3
+        # Подавление относительных шумов весов первого слоя для CIFAR-10
+        if self.reg_cifar_2D is not None:
+            w = self.w.reshape(3, 32, 32, -1)
+            w1 = np.roll(w, 1, axis=1)
+            w2 = np.roll(w, -1, axis=1)
+            w3 = np.roll(w, 1, axis=2)
+            w4 = np.roll(w, -1, axis=2)
+            d = w - (w + w1 + w2 + w3 + w4) / 5
+            gw += d.reshape(3*32*32, -1) * self.reg_cifar_2D
+        if self.reg_sign:
+            #self.w = np.maximum(self.w, 0.01)
+            #w = self.w.reshape(-1, 100)
+            #w = w * np.eye(10).reshape(100)
+            #self.w = w.reshape(-1, 10)
+            self.w[0::2,:] = np.maximum(self.w[0::2,:], 0.01)
+            self.w[1::2,:] = np.minimum(self.w[1::2,:], -0.01)
         return gw
 
     def update(self, dw):
         self.w = self.w + dw
 
-    def trace_statistics(self, x):
-        s = 'Matrix statistics:\n'
-        s += indent(self._trace_single_statistics('column', self.w)) + '\n'
-        s += indent(self._trace_single_statistics('y     ', np.dot(x, self.w)))
-        return s
-
-    @staticmethod
-    def _trace_single_statistics(name, x):
-        mean = np.mean(x, axis=0)
-        std = np.std(x, axis=0)
+    def trace_statistics(self):
+        mean = np.mean(self.w, axis=0)
+        std = np.std(self.w, axis=0)
         std_log = np.log10(std)
-        return '%s: mean: [%.4f, %.4f], std: [%.4f, %.4f], log10: [%.2f, %.2f]' \
-             % (name, mean.min(), mean.max(), std.min(), std.max(), math.log10(std.min()), math.log10(std.max()))
+        print('  Matrix columns statistics: mean: [%.4f, %.4f], std: [%.4f, %.4f], log10: [%.2f, %.2f]' \
+             % (mean.min(), mean.max(), std.min(), std.max(), math.log10(std.min()), math.log10(std.max())))
 
     def __str__(self):
         return '\n'.join([
